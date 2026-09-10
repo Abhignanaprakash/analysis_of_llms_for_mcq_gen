@@ -68,7 +68,8 @@ def human_import(cfg):
     path=Path(cfg["paths"]["outputs"])/"human_rating_form.csv"; df=pd.read_csv(path); required=["rater_id","relevance_1to5","clarity_1to5","correctness_1to5"]
     required.append("distractor_quality_1to5")
     if df[required].isna().any().any(): raise ValueError("Rating form contains blank required fields.")
-    if df.rater_id.nunique()<cfg["evaluation"]["human_raters_required"]: raise ValueError("Fewer than required independent raters.")
+    rater_count=df.rater_id.nunique()
+    if rater_count<cfg["evaluation"]["human_raters_required"] or rater_count>3: raise ValueError("Human evaluation requires 2-3 independent raters.")
     scores=["relevance_1to5","clarity_1to5","correctness_1to5","distractor_quality_1to5"]
     df[scores]=df[scores].apply(pd.to_numeric,errors="raise")
     df["human_score"]=df[scores[:3]].mean(axis=1); averages=df.groupby(["id","model"],as_index=False).agg(human_score=("human_score","mean"),human_distractor_quality=("distractor_quality_1to5","mean"))

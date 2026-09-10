@@ -34,8 +34,10 @@ def run_model(name,spec,cfg):
     out=Path(cfg["paths"]["outputs"])/"adapters"/name
     ta=TrainingArguments(output_dir=str(out),num_train_epochs=tr["epochs"],per_device_train_batch_size=tr["per_device_batch_size"],gradient_accumulation_steps=tr["gradient_accumulation_steps"],learning_rate=tr["learning_rate"],optim=tr["optimizer"],lr_scheduler_type=tr["scheduler"],logging_steps=10,save_strategy="epoch",eval_strategy="epoch",bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),report_to="none",seed=cfg["seed"])
     trainer=SFTTrainer(model=model,tokenizer=tokenizer,train_dataset=data,eval_dataset=val,dataset_text_field="text",max_seq_length=cfg["max_seq_length"],args=ta)
+    if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
     trainer.train(); trainer.save_model(str(out)); tokenizer.save_pretrained(out)
-    (out/"study_metadata.json").write_text(json.dumps({"model":name,"base_model":spec["base_model"],"peft":spec["peft"],"requested_targets":tr["target_modules"],"training":tr,"environment":capture_environment()},indent=2),encoding="utf-8")
+    peak_training_gpu_memory_mb=torch.cuda.max_memory_allocated()/2**20 if torch.cuda.is_available() else 0.0
+    (out/"study_metadata.json").write_text(json.dumps({"model":name,"base_model":spec["base_model"],"peft":spec["peft"],"requested_targets":tr["target_modules"],"training":tr,"peak_training_gpu_memory_mb":peak_training_gpu_memory_mb,"environment":capture_environment()},indent=2),encoding="utf-8")
 def main(args):
     cfg=load_config(args.config); targets=cfg["models"] if args.target in ("","all") else {args.target:cfg["models"][args.target]}
     environment(args)

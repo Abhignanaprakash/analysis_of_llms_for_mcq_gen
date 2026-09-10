@@ -23,18 +23,22 @@ def main(args):
         for model in complete:
             x=complete[model].to_numpy(); lo,hi=ci(x,rng,cfg["statistics"]["bootstrap_iterations"])
             desc.append({"metric":metric,"model":model,"n":len(x),"mean":x.mean(),"median":np.median(x),"variance":np.var(x,ddof=1),"std_dev":np.std(x,ddof=1),"ci95_low":lo,"ci95_high":hi})
-        tests=[]
-        for a,b in combinations(complete.columns,2):
-            t,p=stats.ttest_rel(complete[a],complete[b]); tests.append([a,b,t,p,cohens_d_paired(complete[a],complete[b])])
-        if tests:
-            corrected=multipletests([x[3] for x in tests],alpha=alpha,method="bonferroni")[1]
-            for x,padj in zip(tests,corrected): pairs.append({"metric":metric,"model_a":x[0],"model_b":x[1],"t":x[2],"p_raw":x[3],"p_bonferroni":padj,"significant":padj<alpha,"cohens_d":x[4]})
+        omnibus_significant=False
         if len(complete.columns)>2 and len(complete)>1:
             long=complete.reset_index().melt(id_vars="id",var_name="model",value_name="value")
             try:
                 tab=AnovaRM(long,"value","id",within=["model"]).fit().anova_table.iloc[0]
-                anova.append({"metric":metric,"F":tab["F Value"],"df_num":tab["Num DF"],"df_den":tab["Den DF"],"p":tab["Pr > F"],"significant":tab["Pr > F"]<alpha})
+                omnibus_significant=bool(tab["Pr > F"]<alpha)
+                anova.append({"metric":metric,"F":tab["F Value"],"df_num":tab["Num DF"],"df_den":tab["Den DF"],"p":tab["Pr > F"],"significant":omnibus_significant})
             except ValueError: pass
+        # Pre-registered post-hoc tests are run only after a significant
+        # repeated-measures one-factor ANOVA, controlling familywise error.
+        if omnibus_significant:
+            tests=[]
+            for a,b in combinations(complete.columns,2):
+                t,p=stats.ttest_rel(complete[a],complete[b]); tests.append([a,b,t,p,cohens_d_paired(complete[a],complete[b])])
+            corrected=multipletests([x[3] for x in tests],alpha=alpha,method="bonferroni")[1]
+            for x,padj in zip(tests,corrected): pairs.append({"metric":metric,"model_a":x[0],"model_b":x[1],"t":x[2],"p_raw":x[3],"p_bonferroni":padj,"significant":padj<alpha,"cohens_d":x[4]})
     desc=pd.DataFrame(desc); desc.to_csv(out/"descriptive_and_ci.csv",index=False); pd.DataFrame(pairs).to_csv(out/"paired_ttests_bonferroni_cohens_d.csv",index=False); pd.DataFrame(anova).to_csv(out/"repeated_measures_anova.csv",index=False)
     # Metric correlations use all matched observations, retaining Pearson and rank-based Spearman views.
     numerical=df[metrics].apply(pd.to_numeric,errors="coerce"); pearson=numerical.corr("pearson"); spearman=numerical.corr("spearman"); pearson.to_csv(out/"metric_correlations_pearson.csv"); spearman.to_csv(out/"metric_correlations_spearman.csv")
