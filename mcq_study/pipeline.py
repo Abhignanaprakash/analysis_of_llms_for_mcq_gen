@@ -37,13 +37,14 @@ def sciq_rows():
     for x in ds:
         yield {"context":x["support"], "question":x["question"], "options":[x["correct_answer"],x["distractor1"],x["distractor2"],x["distractor3"]], "answer":0,"source":"SciQ"}
 def arc_rows():
-    for split in ("train", "validation", "test"):
-        for x in load_dataset("allenai/ai2_arc", "ARC-Challenge", split=split):
-            choices=x["choices"]; yield {"context":x.get("question", ""),"question":x["question"],"options":choices["text"],"answer":x["answerKey"],"source":"ARC-Challenge"}
+    for subset in ("ARC-Easy", "ARC-Challenge"):
+        for split in ("train", "validation", "test"):
+            for x in load_dataset("allenai/ai2_arc", subset, split=split):
+                choices=x["choices"]; yield {"context":x.get("question", ""),"question":x["question"],"options":choices["text"],"answer":x["answerKey"],"source":subset}
 def openbook_rows():
     for split in ("train", "validation", "test"):
         for x in load_dataset("allenai/openbookqa", "main", split=split):
-            choices=x["choices"]; yield {"context":x["question_stem"],"question":x["question_stem"],"options":choices["text"],"answer":x["answerKey"],"source":"OpenBookQA"}
+            choices=x["choices"]; yield {"context":x.get("fact1") or x["question_stem"],"question":x["question_stem"],"options":choices["text"],"answer":x["answerKey"],"source":"OpenBookQA"}
 def simhash(text, bits=64):
     """Token-shingle SimHash, enabling near-duplicate candidate retrieval."""
     tokens=re.findall(r"\w+",text.casefold())
