@@ -1,0 +1,70 @@
+seed: 3407
+max_seq_length: 2048
+paths:
+  custom_data: data/raw/custom_cs_mcq.jsonl
+  processed: data/processed
+  outputs: outputs
+split: {train: 0.80, validation: 0.10, test: 0.10}
+training:
+  epochs: 3
+  per_device_batch_size: 4
+  gradient_accumulation_steps: 1
+  learning_rate: 2.0e-4
+  optimizer: adamw_torch
+  scheduler: cosine
+  lora_rank: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj]
+generation:
+  max_new_tokens: 256
+  do_sample: false
+  temperature: 1.0
+models:
+  gemma_2b:
+    base_model: google/gemma-2-2b-it
+    peft: lora
+  gemma_9b:
+    base_model: google/gemma-2-9b-it
+    peft: qlora
+  llama_3_2:
+    # Change to the Llama 3.2 variant authorised for your Hugging Face account.
+    base_model: meta-llama/Llama-3.2-3B-Instruct
+    peft: lora
+  qwen_2_5:
+    base_model: Qwen/Qwen2.5-3B-Instruct
+    peft: lora
+  mistral_7b:
+    base_model: mistralai/Mistral-7B-Instruct-v0.3
+    peft: qlora
+evaluation:
+  sentence_model: all-MiniLM-L6-v2
+  bertscore_model: microsoft/deberta-xlarge-mnli
+  language: en-US
+  bloom_provider: heuristic # set to openai only with OPENAI_API_KEY
+  human_raters_required: 2
+statistics:
+  alpha: 0.05
+  bootstrap_iterations: 10000
+  metric_directions:
+    accuracy: higher
+    grammar_quality: higher
+    bloom_alignment: higher
+    distractor_quality: higher
+    hallucination_rate: lower
+    diversity: higher
+    response_time_s: lower
+    peak_gpu_memory_mb: lower
+    tokens_per_second: higher
+    human_score: higher
+  deployment_weights:
+    accuracy: 3
+    grammar_quality: 2
+    bloom_alignment: 2
+    distractor_quality: 2
+    hallucination_rate: 3
+    diversity: 1
+    response_time_s: 2
+    peak_gpu_memory_mb: 2
+    tokens_per_second: 2
+    human_score: 3

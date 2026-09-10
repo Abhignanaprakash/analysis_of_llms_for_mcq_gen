@@ -1,0 +1,1 @@
+{"context":"A stack is a linear data structure that follows last in, first out order.","question":"Which access rule does a stack follow?","options":["FIFO","LIFO","Random access","Priority order"],"answer":"B","subject":"data_structures","source":"curated_example","license":"replace-with-verified-license"}
