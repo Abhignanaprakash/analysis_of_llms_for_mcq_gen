@@ -4,6 +4,9 @@ paths:
   custom_data: data/raw/custom_cs_mcq.jsonl
   processed: data/processed
   outputs: outputs
+data_requirements:
+  min_custom_examples: 100
+  required_custom_fields: [context, question, options, answer, subject, source, license]
 split: {train: 0.80, validation: 0.10, test: 0.10}
 training:
   epochs: 3
@@ -39,9 +42,10 @@ models:
     peft: qlora
 evaluation:
   sentence_model: all-MiniLM-L6-v2
-  bertscore_model: microsoft/deberta-xlarge-mnli
+  entailment_model: facebook/bart-large-mnli
   language: en-US
-  bloom_provider: heuristic # set to openai only with OPENAI_API_KEY
+  bloom_provider: openai
+  bloom_model: gpt-4.1-mini
   human_raters_required: 2
 statistics:
   alpha: 0.05

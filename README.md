@@ -19,6 +19,11 @@ Put curator-reviewed B.Tech CS(AI) questions in
 licence explicitly permits reuse. Set `HF_TOKEN` in your environment for gated
 models; never place it in a notebook or commit it.
 
+The build refuses to proceed unless the custom set has at least 100 examples and
+every row records `context`, `question`, four `options`, `answer`, `subject`,
+`source`, and a verified `license`. Change this threshold only with a documented
+report-methods amendment.
+
 ## Reproducible run order
 
 ```powershell
@@ -28,6 +33,11 @@ python -m mcq_study generate all --config configs/study.yaml
 python -m mcq_study evaluate automated --config configs/study.yaml
 python -m mcq_study stats --config configs/study.yaml
 ```
+
+Automated Bloom alignment sends generated and reference questions to the OpenAI
+Responses API and needs `OPENAI_API_KEY`; the implementation uses strict JSON
+schema output so each classification is reproducible and machine-readable.
+Entailment-based hallucination scoring downloads the configured MNLI model.
 
 Run `python -m mcq_study evaluate human-form` to produce a CSV for 2–3
 independent raters, then `human-import` after it is completed. `environment`

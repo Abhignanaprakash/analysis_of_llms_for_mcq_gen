@@ -38,8 +38,14 @@ def main(args):
     desc=pd.DataFrame(desc); desc.to_csv(out/"descriptive_and_ci.csv",index=False); pd.DataFrame(pairs).to_csv(out/"paired_ttests_bonferroni_cohens_d.csv",index=False); pd.DataFrame(anova).to_csv(out/"repeated_measures_anova.csv",index=False)
     # Metric correlations use all matched observations, retaining Pearson and rank-based Spearman views.
     numerical=df[metrics].apply(pd.to_numeric,errors="coerce"); pearson=numerical.corr("pearson"); spearman=numerical.corr("spearman"); pearson.to_csv(out/"metric_correlations_pearson.csv"); spearman.to_csv(out/"metric_correlations_spearman.csv")
+    # The report permits a composite ranking only after inferential analysis.
+    # Include only metrics with at least one significant, non-undefined paired
+    # effect size; otherwise publish the reason rather than an arbitrary rank.
+    pair_df=pd.DataFrame(pairs)
+    eligible_metrics=set(pair_df.loc[pair_df.significant & pair_df.cohens_d.notna(),"metric"]) if not pair_df.empty else set()
     rankings=[]
     for metric, direction in cfg["statistics"]["metric_directions"].items():
+        if metric not in eligible_metrics: continue
         sub=desc[desc.metric==metric]
         if sub.empty: continue
         ranks=sub.set_index("model")["mean"].rank(ascending=direction=="lower",method="average")
@@ -47,6 +53,8 @@ def main(args):
     rank=pd.DataFrame(rankings)
     if not rank.empty:
         composite=rank.assign(weighted=lambda x:x["rank"]*x["weight"]).groupby("model").agg(weighted_rank=("weighted","sum"),weight_total=("weight","sum")).reset_index(); composite["composite_rank_score"]=composite.weighted_rank/composite.weight_total; composite.sort_values("composite_rank_score").to_csv(out/"composite_ranking.csv",index=False)
+    else:
+        (out/"composite_ranking_not_performed.txt").write_text("No metric had a statistically significant paired comparison with a defined Cohen's d. A composite rank would violate the pre-registered analysis rule.\n",encoding="utf-8")
     # Pareto frontier: do not claim a universal winner; maximize quality, minimize response time and memory.
     quality=desc[desc.metric.isin(["accuracy","grammar_quality","bloom_alignment","distractor_quality","human_score"])].groupby("model").mean(numeric_only=True)["mean"].rename("mean_quality")
     compute=desc[desc.metric.isin(["response_time_s","peak_gpu_memory_mb"])].pivot(index="model",columns="metric",values="mean")

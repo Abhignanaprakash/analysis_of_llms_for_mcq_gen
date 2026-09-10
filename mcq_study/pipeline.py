@@ -44,14 +44,27 @@ def openbook_rows():
     for split in ("train", "validation", "test"):
         for x in load_dataset("allenai/openbookqa", "main", split=split):
             choices=x["choices"]; yield {"context":x["question_stem"],"question":x["question_stem"],"options":choices["text"],"answer":x["answerKey"],"source":"OpenBookQA"}
+def simhash(text, bits=64):
+    """Token-shingle SimHash, enabling near-duplicate candidate retrieval."""
+    tokens=re.findall(r"\w+",text.casefold())
+    shingles=[" ".join(tokens[i:i+3]) for i in range(max(1,len(tokens)-2))]
+    weights=[0]*bits
+    for shingle in shingles:
+        h=int(hashlib.sha256(shingle.encode()).hexdigest()[:16],16)
+        for bit in range(bits): weights[bit] += 1 if h & (1<<bit) else -1
+    return sum((1<<bit) for bit,weight in enumerate(weights) if weight >= 0)
 def deduplicate(rows, threshold=96):
     kept=[]; buckets={}
     for row in rows:
-        key=hashlib.sha1(re.sub(r"\W", "", row["context"].casefold()).encode()).hexdigest()[:8]
-        candidates=buckets.setdefault(key, [])
         text=row["context"]+" "+row["question"]
+        fingerprint=simhash(text)
+        # Four 16-bit bands are locality-sensitive buckets; final fuzzy matching
+        # prevents a hash collision from incorrectly dropping a distinct item.
+        keys=[(band,(fingerprint>>(band*16))&0xffff) for band in range(4)]
+        candidates={id(x):x for key in keys for x in buckets.get(key,[])}.values()
         if any(ratio(text, old["context"]+" "+old["question"]) >= threshold for old in candidates): continue
-        candidates.append(row); kept.append(row)
+        for key in keys: buckets.setdefault(key,[]).append(row)
+        kept.append(row)
     return kept
 def render_target(r):
     return "Question: {question}\nA. {a}\nB. {b}\nC. {c}\nD. {d}\nCorrect Answer: {answer}".format(question=r["question"],a=r["options"][0],b=r["options"][1],c=r["options"][2],d=r["options"][3],answer=r["answer"])
@@ -59,8 +72,12 @@ def main(args):
     cfg=load_config(args.config); seed_everything(cfg["seed"]); raw=[]
     for provider in (sciq_rows,arc_rows,openbook_rows): raw.extend(provider())
     custom=Path(cfg["paths"]["custom_data"])
-    if custom.exists(): raw.extend(jsonl(custom))
-    else: print(f"WARNING: custom dataset missing: {custom}; add it before the final study.")
+    if not custom.exists(): raise FileNotFoundError(f"Required curated CS dataset is missing: {custom}")
+    custom_rows=list(jsonl(custom)); requirements=cfg["data_requirements"]
+    if len(custom_rows)<requirements["min_custom_examples"]: raise ValueError(f"Custom dataset has {len(custom_rows)} rows; required minimum is {requirements['min_custom_examples']}")
+    missing=[(i,field) for i,row in enumerate(custom_rows,1) for field in requirements["required_custom_fields"] if not row.get(field)]
+    if missing: raise ValueError(f"Custom dataset is missing required provenance/content fields; first failures: {missing[:10]}")
+    raw.extend(custom_rows)
     cleaned=[x for x in (normalize(r) for r in raw) if x]; rows=deduplicate(cleaned)
     for r in rows: r["target"]=render_target(r)
     from datasets import Dataset

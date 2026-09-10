@@ -17,16 +17,30 @@ def grammar_score(tool,text):
     words=max(1,len(re.findall(r"\b\w+\b",text))); errors=len(tool.check(text)); return float(np.clip(5-errors/words*25,1,5))
 def distinct_n(text,n=2):
     words=re.findall(r"\w+",text.lower()); grams=list(zip(*[words[i:] for i in range(n)])); return len(set(grams))/len(grams) if grams else 0.0
-def bloom_heuristic(question):
-    q=question.lower(); verbs={"remember":["define","list","identify","what is","which"],"understand":["explain","summarize","describe"],"apply":["use","calculate","solve","implement"],"analyze":["compare","differentiate","analyze"],"evaluate":["justify","evaluate","assess"],"create":["design","create","develop"]}
-    for i,(level,keys) in enumerate(verbs.items(),1):
-        if any(k in q for k in keys): return i,level
-    return 1,"remember"
+def bloom_llm(cfg, generated_question, reference_question):
+    """Classify both questions with a versioned structured LLM judgement."""
+    if cfg["evaluation"]["bloom_provider"] != "openai":
+        raise ValueError("Bloom alignment requires evaluation.bloom_provider: openai; heuristic labels are not report-valid.")
+    import os
+    if not os.getenv("OPENAI_API_KEY"): raise EnvironmentError("Set OPENAI_API_KEY before LLM-assisted Bloom evaluation.")
+    from openai import OpenAI
+    schema={"type":"object","properties":{"generated_level":{"type":"integer","enum":[1,2,3,4,5,6]},"reference_level":{"type":"integer","enum":[1,2,3,4,5,6]},"generated_label":{"type":"string","enum":["remember","understand","apply","analyze","evaluate","create"]},"reference_label":{"type":"string","enum":["remember","understand","apply","analyze","evaluate","create"]}},"required":["generated_level","reference_level","generated_label","reference_label"],"additionalProperties":False}
+    prompt=("Classify each MCQ question using revised Bloom's taxonomy: 1 remember, 2 understand, 3 apply, 4 analyze, 5 evaluate, 6 create. Classify the cognitive operation required to answer it, not its topic.\n\nGenerated question:\n"+generated_question+"\n\nReference question:\n"+reference_question)
+    response=OpenAI().responses.create(model=cfg["evaluation"]["bloom_model"],input=prompt,store=False,text={"format":{"type":"json_schema","name":"bloom_pair","strict":True,"schema":schema}})
+    return json.loads(response.output_text)
+def entailment_pipeline(cfg):
+    from transformers import pipeline
+    import torch
+    return pipeline("text-classification",model=cfg["evaluation"]["entailment_model"],top_k=None,device=0 if torch.cuda.is_available() else -1)
+def hallucination_rate(classifier, context, generated):
+    predictions=classifier({"text":context,"text_pair":generated[:1500]})
+    entailment=next((p["score"] for p in predictions if "entail" in p["label"].lower()),0.0)
+    return 1-float(entailment)
 def automated(cfg):
     try:
         import language_tool_python; tool=language_tool_python.LanguageTool(cfg["evaluation"]["language"])
     except Exception as exc: raise RuntimeError("LanguageTool requires Java; install it before automated evaluation.") from exc
-    encoder=SentenceTransformer(cfg["evaluation"]["sentence_model"])
+    encoder=SentenceTransformer(cfg["evaluation"]["sentence_model"]); nli=entailment_pipeline(cfg)
     rows=[]; generation_dir=Path(cfg["paths"]["outputs"])/"generations"
     for file in generation_dir.glob("*.csv"):
         for r in csv.DictReader(open(file,encoding="utf-8")):
@@ -34,31 +48,30 @@ def automated(cfg):
             sim=cosine_similarity(encoder.encode(options)) if len(options)==4 else np.zeros((4,4))
             # Mean distance among distractors and between distractors and correct answer.
             distractor=1-float((sim.sum()-np.trace(sim))/(len(options)*(len(options)-1))) if len(options)==4 else 0.0
-            level,label=bloom_heuristic(question)
-            rows.append({**r,"parsed_answer":answer,"accuracy":float(answer==r["reference_answer"]),"grammar_quality":grammar_score(tool,r["generated"]),"bloom_level":level,"bloom_label":label,"bloom_alignment":float(level>0),"distractor_quality":distractor,"diversity":distinct_n(r["generated"]),"hallucination_rate":np.nan})
-    # Entailment / hallucination score: NLI is optional because it is expensive; record NA until explicitly run.
-    # `run_entailment` below makes the method and model traceable rather than treating BERTScore as factual proof.
+            bloom=bloom_llm(cfg,question,r["reference_question"])
+            rows.append({**r,"parsed_answer":answer,"accuracy":float(answer==r["reference_answer"]),"grammar_quality":grammar_score(tool,r["generated"]),"bloom_level":bloom["generated_level"],"bloom_label":bloom["generated_label"],"reference_bloom_level":bloom["reference_level"],"reference_bloom_label":bloom["reference_label"],"bloom_alignment":float(bloom["generated_level"]==bloom["reference_level"]),"distractor_quality":distractor,"diversity":distinct_n(r["generated"]),"hallucination_rate":hallucination_rate(nli,r["context"],r["generated"])})
     frame=pd.DataFrame(rows); out=Path(cfg["paths"]["outputs"])/"metrics"; out.mkdir(parents=True,exist_ok=True); frame.to_csv(out/"automated_metrics.csv",index=False)
     print(out/"automated_metrics.csv")
 def run_entailment(cfg):
     """Fill hallucination_rate using an MNLI model: 1 - P(context entails generated question)."""
-    from transformers import pipeline
-    p=pipeline("text-classification",model=cfg["evaluation"]["bertscore_model"],top_k=None,device=0 if __import__('torch').cuda.is_available() else -1)
+    p=entailment_pipeline(cfg)
     path=Path(cfg["paths"]["outputs"])/"metrics"/"automated_metrics.csv"; df=pd.read_csv(path)
     values=[]
     for _,r in df.iterrows():
-        pred=p({"text":r["context"],"text_pair":r["generated"][:1000]})
-        entail=next((x["score"] for x in pred if x["label"].upper().startswith("ENTAIL")),0.0); values.append(1-entail)
+        values.append(hallucination_rate(p,r["context"],r["generated"]))
     df["hallucination_rate"]=values; df.to_csv(path,index=False)
 def human_form(cfg):
     df=pd.read_csv(Path(cfg["paths"]["outputs"])/"metrics"/"automated_metrics.csv"); dest=Path(cfg["paths"]["outputs"])/"human_rating_form.csv"
-    df[["id","model","context","generated"]].assign(rater_id="", relevance_1to5="", clarity_1to5="", correctness_1to5="", comments="").to_csv(dest,index=False)
+    df[["id","model","context","generated"]].assign(rater_id="", relevance_1to5="", clarity_1to5="", correctness_1to5="", distractor_quality_1to5="", comments="").to_csv(dest,index=False)
     print(f"Share {dest} with at least {cfg['evaluation']['human_raters_required']} independent raters. Keep model labels blinded if possible.")
 def human_import(cfg):
     path=Path(cfg["paths"]["outputs"])/"human_rating_form.csv"; df=pd.read_csv(path); required=["rater_id","relevance_1to5","clarity_1to5","correctness_1to5"]
+    required.append("distractor_quality_1to5")
     if df[required].isna().any().any(): raise ValueError("Rating form contains blank required fields.")
     if df.rater_id.nunique()<cfg["evaluation"]["human_raters_required"]: raise ValueError("Fewer than required independent raters.")
-    df["human_score"]=df[["relevance_1to5","clarity_1to5","correctness_1to5"]].mean(axis=1); averages=df.groupby(["id","model"],as_index=False).human_score.mean()
+    scores=["relevance_1to5","clarity_1to5","correctness_1to5","distractor_quality_1to5"]
+    df[scores]=df[scores].apply(pd.to_numeric,errors="raise")
+    df["human_score"]=df[scores[:3]].mean(axis=1); averages=df.groupby(["id","model"],as_index=False).agg(human_score=("human_score","mean"),human_distractor_quality=("distractor_quality_1to5","mean"))
     metrics=Path(cfg["paths"]["outputs"])/"metrics"/"automated_metrics.csv"; base=pd.read_csv(metrics).drop(columns=["human_score"],errors="ignore").merge(averages,on=["id","model"],how="left"); base.to_csv(metrics,index=False)
 def main(args):
     cfg=load_config(args.config); action=args.target or "automated"
