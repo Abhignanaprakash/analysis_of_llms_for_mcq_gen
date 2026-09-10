@@ -36,8 +36,8 @@ def run_model(name,spec,cfg):
     trainer=SFTTrainer(model=model,tokenizer=tokenizer,train_dataset=data,eval_dataset=val,dataset_text_field="text",max_seq_length=cfg["max_seq_length"],args=ta)
     if torch.cuda.is_available(): torch.cuda.reset_peak_memory_stats()
     trainer.train(); trainer.save_model(str(out)); tokenizer.save_pretrained(out)
-    peak_training_gpu_memory_mb=torch.cuda.max_memory_allocated()/2**20 if torch.cuda.is_available() else 0.0
-    (out/"study_metadata.json").write_text(json.dumps({"model":name,"base_model":spec["base_model"],"peft":spec["peft"],"requested_targets":tr["target_modules"],"training":tr,"peak_training_gpu_memory_mb":peak_training_gpu_memory_mb,"environment":capture_environment()},indent=2),encoding="utf-8")
+    peak_training_gpu_memory_gb=torch.cuda.max_memory_allocated()/2**30 if torch.cuda.is_available() else 0.0
+    (out/"study_metadata.json").write_text(json.dumps({"model":name,"base_model":spec["base_model"],"peft":spec["peft"],"requested_targets":tr["target_modules"],"training":tr,"peak_training_gpu_memory_gb":peak_training_gpu_memory_gb,"environment":capture_environment()},indent=2),encoding="utf-8")
 def main(args):
     cfg=load_config(args.config); targets=cfg["models"] if args.target in ("","all") else {args.target:cfg["models"][args.target]}
     environment(args)

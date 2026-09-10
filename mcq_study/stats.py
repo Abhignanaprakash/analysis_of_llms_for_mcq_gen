@@ -61,14 +61,14 @@ def main(args):
         (out/"composite_ranking_not_performed.txt").write_text("No metric had a statistically significant paired comparison with a defined Cohen's d. A composite rank would violate the pre-registered analysis rule.\n",encoding="utf-8")
     # Pareto frontier: do not claim a universal winner; maximize quality, minimize response time and memory.
     quality=desc[desc.metric.isin(["accuracy","grammar_quality","bloom_alignment","distractor_quality","human_score"])].groupby("model").mean(numeric_only=True)["mean"].rename("mean_quality")
-    compute=desc[desc.metric.isin(["response_time_s","peak_gpu_memory_mb"])].pivot(index="model",columns="metric",values="mean")
+    compute=desc[desc.metric.isin(["response_time_s","peak_gpu_memory_gb"])].pivot(index="model",columns="metric",values="mean")
     frontier=quality.to_frame().join(compute).reset_index()
     # A model is Pareto efficient when no other model is at least as good on all
     # three deployment axes and strictly better on one.
     frontier["pareto_efficient"]=True
     for i,row in frontier.iterrows():
         others=frontier.drop(index=i)
-        dominated=((others.mean_quality>=row.mean_quality)&(others.response_time_s<=row.response_time_s)&(others.peak_gpu_memory_mb<=row.peak_gpu_memory_mb)&((others.mean_quality>row.mean_quality)|(others.response_time_s<row.response_time_s)|(others.peak_gpu_memory_mb<row.peak_gpu_memory_mb))).any()
+        dominated=((others.mean_quality>=row.mean_quality)&(others.response_time_s<=row.response_time_s)&(others.peak_gpu_memory_gb<=row.peak_gpu_memory_gb)&((others.mean_quality>row.mean_quality)|(others.response_time_s<row.response_time_s)|(others.peak_gpu_memory_gb<row.peak_gpu_memory_gb))).any()
         frontier.loc[i,"pareto_efficient"]=not dominated
     frontier.to_csv(out/"quality_compute_tradeoff.csv",index=False)
     print(f"Statistics written to {out}; interpret composite ranks only alongside significant paired tests and effect sizes.")

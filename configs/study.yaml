@@ -43,6 +43,7 @@ models:
 evaluation:
   sentence_model: all-MiniLM-L6-v2
   entailment_model: facebook/bart-large-mnli
+  entailment_threshold: 0.50
   language: en-US
   bloom_provider: openai
   bloom_model: gpt-4.1-mini
@@ -58,7 +59,7 @@ statistics:
     hallucination_rate: lower
     diversity: higher
     response_time_s: lower
-    peak_gpu_memory_mb: lower
+    peak_gpu_memory_gb: lower
     tokens_per_second: higher
     human_score: higher
   deployment_weights:
@@ -69,6 +70,6 @@ statistics:
     hallucination_rate: 3
     diversity: 1
     response_time_s: 2
-    peak_gpu_memory_mb: 2
+    peak_gpu_memory_gb: 2
     tokens_per_second: 2
     human_score: 3

@@ -24,18 +24,18 @@ def bloom_llm(cfg, generated_question, reference_question):
     import os
     if not os.getenv("OPENAI_API_KEY"): raise EnvironmentError("Set OPENAI_API_KEY before LLM-assisted Bloom evaluation.")
     from openai import OpenAI
-    schema={"type":"object","properties":{"generated_level":{"type":"integer","enum":[1,2,3,4,5,6]},"reference_level":{"type":"integer","enum":[1,2,3,4,5,6]},"generated_label":{"type":"string","enum":["remember","understand","apply","analyze","evaluate","create"]},"reference_label":{"type":"string","enum":["remember","understand","apply","analyze","evaluate","create"]}},"required":["generated_level","reference_level","generated_label","reference_label"],"additionalProperties":False}
-    prompt=("Classify each MCQ question using revised Bloom's taxonomy: 1 remember, 2 understand, 3 apply, 4 analyze, 5 evaluate, 6 create. Classify the cognitive operation required to answer it, not its topic.\n\nGenerated question:\n"+generated_question+"\n\nReference question:\n"+reference_question)
+    schema={"type":"object","properties":{"generated_level":{"type":"integer","enum":[1,2,3,4]},"reference_level":{"type":"integer","enum":[1,2,3,4]},"generated_label":{"type":"string","enum":["recall","understand","apply","analyse"]},"reference_label":{"type":"string","enum":["recall","understand","apply","analyse"]}},"required":["generated_level","reference_level","generated_label","reference_label"],"additionalProperties":False}
+    prompt=("Classify each MCQ question using this four-level Bloom rubric: 1 recall, 2 understand, 3 apply, 4 analyse. Classify the cognitive operation required to answer it, not its topic.\n\nGenerated question:\n"+generated_question+"\n\nReference question:\n"+reference_question)
     response=OpenAI().responses.create(model=cfg["evaluation"]["bloom_model"],input=prompt,store=False,text={"format":{"type":"json_schema","name":"bloom_pair","strict":True,"schema":schema}})
     return json.loads(response.output_text)
 def entailment_pipeline(cfg):
     from transformers import pipeline
     import torch
     return pipeline("text-classification",model=cfg["evaluation"]["entailment_model"],top_k=None,device=0 if torch.cuda.is_available() else -1)
-def hallucination_rate(classifier, context, generated):
+def hallucination_rate(cfg, classifier, context, generated):
     predictions=classifier({"text":context,"text_pair":generated[:1500]})
     entailment=next((p["score"] for p in predictions if "entail" in p["label"].lower()),0.0)
-    return 1-float(entailment)
+    return float(entailment < cfg["evaluation"]["entailment_threshold"])
 def automated(cfg):
     try:
         import language_tool_python; tool=language_tool_python.LanguageTool(cfg["evaluation"]["language"])
@@ -49,16 +49,16 @@ def automated(cfg):
             # Mean distance among distractors and between distractors and correct answer.
             distractor=1-float((sim.sum()-np.trace(sim))/(len(options)*(len(options)-1))) if len(options)==4 else 0.0
             bloom=bloom_llm(cfg,question,r["reference_question"])
-            rows.append({**r,"parsed_answer":answer,"accuracy":float(answer==r["reference_answer"]),"grammar_quality":grammar_score(tool,r["generated"]),"bloom_level":bloom["generated_level"],"bloom_label":bloom["generated_label"],"reference_bloom_level":bloom["reference_level"],"reference_bloom_label":bloom["reference_label"],"bloom_alignment":float(bloom["generated_level"]==bloom["reference_level"]),"distractor_quality":distractor,"diversity":distinct_n(r["generated"]),"hallucination_rate":hallucination_rate(nli,r["context"],r["generated"])})
+            rows.append({**r,"parsed_answer":answer,"accuracy":float(answer==r["reference_answer"]),"grammar_quality":grammar_score(tool,r["generated"]),"bloom_level":bloom["generated_level"],"bloom_label":bloom["generated_label"],"reference_bloom_level":bloom["reference_level"],"reference_bloom_label":bloom["reference_label"],"bloom_alignment":float(bloom["generated_level"]==bloom["reference_level"]),"distractor_quality":1+4*distractor,"diversity":distinct_n(r["generated"]),"hallucination_rate":hallucination_rate(cfg,nli,r["context"],r["generated"])})
     frame=pd.DataFrame(rows); out=Path(cfg["paths"]["outputs"])/"metrics"; out.mkdir(parents=True,exist_ok=True); frame.to_csv(out/"automated_metrics.csv",index=False)
     print(out/"automated_metrics.csv")
 def run_entailment(cfg):
-    """Fill hallucination_rate using an MNLI model: 1 - P(context entails generated question)."""
+    """Fill per-item unsupported-claim flags using the configured MNLI threshold."""
     p=entailment_pipeline(cfg)
     path=Path(cfg["paths"]["outputs"])/"metrics"/"automated_metrics.csv"; df=pd.read_csv(path)
     values=[]
     for _,r in df.iterrows():
-        values.append(hallucination_rate(p,r["context"],r["generated"]))
+        values.append(hallucination_rate(cfg,p,r["context"],r["generated"]))
     df["hallucination_rate"]=values; df.to_csv(path,index=False)
 def human_form(cfg):
     df=pd.read_csv(Path(cfg["paths"]["outputs"])/"metrics"/"automated_metrics.csv"); dest=Path(cfg["paths"]["outputs"])/"human_rating_form.csv"
