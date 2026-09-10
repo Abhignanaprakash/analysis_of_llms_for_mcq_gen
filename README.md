@@ -5,6 +5,9 @@ It creates one immutable composite split, fine-tunes five adapter configurations
 generates on the shared test split, computes automated and human-assisted metrics,
 and performs paired statistical analysis.
 
+See [FINAL_RECORD.md](FINAL_RECORD.md) for the implementation status and the
+conditions required before results can be reported.
+
 ## Setup
 
 ```powershell
